@@ -27,11 +27,11 @@ env = RedGymEnv(config=env_config)
 env_checker.check_env(env)
 
 learn_steps = 40
-file_name = 'poke_' #'best_12-7/poke_12_b'
+file_name = 'session_4da05e87_main_good/poke_439746560_steps' #'best_12-7/poke_12_b'
 inference_only = True 
 
 if exists(file_name + '.zip'):
-    print('\nloading checkpoint')
+    print(f'loading checkpoint')
     custom_objects = None
     if inference_only:
         custom_objects = {

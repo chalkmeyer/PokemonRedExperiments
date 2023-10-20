@@ -14,7 +14,7 @@ def make_env(rank, env_conf, seed=0):
     Utility function for multiprocessed env.
     :param env_id: (str) the environment ID
     :param num_env: (int) the number of environments you wish to have in subprocesses
-    :param seed: (int) the inital seed for RNG
+    :param seed: (int) the initial seed for RNG
     :param rank: (int) index of the subprocess
     """
     def _init():
@@ -45,7 +45,7 @@ if __name__ == '__main__':
     file_name = 'session_4da05e87_main_good/poke_439746560_steps'
     
     if exists(file_name + '.zip'):
-        print('\nloading checkpoint')
+        print(f'loading checkpoint')
         model = PPO.load(file_name, env=env, custom_objects={'lr_schedule': 0, 'clip_range': 0})
         model.n_steps = ep_length
         model.n_envs = num_cpu
@@ -53,7 +53,7 @@ if __name__ == '__main__':
         model.rollout_buffer.n_envs = num_cpu
         model.rollout_buffer.reset()
     else:
-        model = PPO('CnnPolicy', env, verbose=1, n_steps=ep_length, batch_size=512, n_epochs=1, gamma=0.999)
+        model = PPO('CnnPolicy', env, verbose=1, n_steps=ep_length, batch_size=64, n_epochs=3, gamma=0.99, learning_rate=0.1, ent_coef=0.01)
     
     #keyboard.on_press_key("M", toggle_agent)
     obs, info = env.reset()

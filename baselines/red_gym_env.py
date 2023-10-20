@@ -136,7 +136,9 @@ class RedGymEnv(Env):
         self.max_level_rew = 0
         self.last_health = 1
         self.total_healing_rew = 0
-        self.died_count = 0
+        self.enemy_hp = 0
+        self.damage = 0
+        self.prev_damage_dealt = 0
         self.step_count = 0
         self.progress_reward = self.get_game_state_reward()
         self.total_reward = sum([val for _, val in self.progress_reward.items()])
@@ -187,6 +189,8 @@ class RedGymEnv(Env):
         self.update_frame_knn_index(obs_flat)
             
         self.update_heal_reward()
+
+        self.update_enemy_hp()
 
         new_reward, new_prog = self.update_reward()
         
@@ -241,8 +245,12 @@ class RedGymEnv(Env):
             'pcount': self.read_m(0xD163), 'levels': levels, 'ptypes': self.read_party(),
             'hp': self.read_hp_fraction(),
             'frames': self.knn_index.get_current_count(),
-            'deaths': self.died_count, 'badge': self.get_badges(),
-            'event': self.progress_reward['event'], 'healr': self.total_healing_rew
+            'badge': self.get_badges(),
+            'event': self.progress_reward['event'], 'healr': self.total_healing_rew,
+            'enemy_hp': self.read_m(0xCFF5),
+            'enemy_damage': self.read_m(0xCFE7),
+            'opponent_level': self.read_m(0xCFE8),
+            'your_level': [self.read_m(a) for a in [0xD18C, 0xD1B8, 0xD1E4, 0xD210, 0xD23C, 0xD268]],
         })
 
     def update_frame_knn_index(self, frame_vec):
@@ -416,8 +424,6 @@ class RedGymEnv(Env):
                     print(f'healed: {heal_amount}')
                     self.save_screenshot('healing')
                 self.total_healing_rew += heal_amount * 4
-            else:
-                self.died_count += 1
     
     def get_all_events_reward(self):
         return max(sum([self.bit_count(self.read_m(i)) for i in range(0xD747, 0xD886)]) - 13, 0)
@@ -437,6 +443,23 @@ class RedGymEnv(Env):
         self.max_opponent_level = max(self.max_opponent_level, opponent_level)
         enemy_poke_count = self.read_m(0xD89C)
         self.max_opponent_poke = max(self.max_opponent_poke, enemy_poke_count)
+
+    def update_damage(self):
+        previous_enemy_hp = self.read_m(0xCFE6)
+        hp_high = self.read_m(0xCFE6)
+        hp_low = self.read_m(0xCFE7)
+        current_enemy_hp = (hp_high <<8) | hp_low
+        
+        damage = previous_enemy_hp - current_enemy_hp
+        if oppenent_level >= your_level - 5:
+            if current_enemy_hp < previous_enemy_hp:
+                if damage > 50:
+                    damage_reward = 0.01
+                else:
+                    damage_reward = 0.001
+
+        return self.damage * damage_reward
+                    
         
         if print_stats:
             print(f'num_poke : {num_poke}')
@@ -452,8 +475,8 @@ class RedGymEnv(Env):
             #'party_xp': 0.1*sum(poke_xps),
             'level': self.get_levels_reward(), 
             'heal': self.total_healing_rew,
+            'damage': self.damage,
             'op_lvl': self.update_max_op_level(),
-            'dead': -0.1*self.died_count,
             'badge': self.get_badges() * 2,
             #'op_poke': self.max_opponent_poke * 800,
             #'money': money * 3,
@@ -471,17 +494,55 @@ class RedGymEnv(Env):
             self.render(reduce_res=False))
     
     def update_max_op_level(self):
-        #opponent_level = self.read_m(0xCFE8) - 5 # base level
-        opponent_level = max([self.read_m(a) for a in [0xD8C5, 0xD8F1, 0xD91D, 0xD949, 0xD975, 0xD9A1]]) - 5
-        #if opponent_level >= 7:
+        opponent_level = self.read_m(0xCFE8)
+        your_level = max([self.read_m(a) for a in [0xD8C5, 0xD8F1, 0xD91D, 0xD949, 0xD975, 0xD9A1]]) - 5
+        if opponent_level <= your_level:
         #    self.save_screenshot('highlevelop')
-        self.max_opponent_level = max(self.max_opponent_level, opponent_level)
+            self.max_opponent_level = max(self.max_opponent_level, opponent_level)
         return self.max_opponent_level * 0.2
     
     def update_max_event_rew(self):
         cur_rew = self.get_all_events_reward()
         self.max_event_rew = max(cur_rew, self.max_event_rew)
         return self.max_event_rew
+
+    #trying to create a reward for damaging pokemon
+    def update_enemy_hp(self):
+        enemy_hp = self.read_m(0xCFF5) #HP Stat for pokemon 
+        damaged_hp = self.read_m(0xCFE7) #Hp of damaged pokemon, current HP
+        opponent_level = self.read_m(0xCFE8) 
+        your_level = max([self.read_m(a) for a in [0xD8C5, 0xD8F1, 0xD91D, 0xD949, 0xD975, 0xD9A1]]) - 5
+        num_turns_battle = self.read_m(0xCCD5)
+
+        # print(f"Previous HP: {enemy_hp}")
+        # print(f"Damage Hp {damaged_hp}")
+        damage = enemy_hp - damaged_hp
+        # print(f"Damage: {damage}")
+        # print(f"opponent level {opponent_level}")
+        # print(f"your level {your_level}")
+
+        damage_reward = 0
+
+        if damage > self.prev_damage_dealt:
+            self.prev_damage_dealt = damage
+            damage_reward =.001
+            self.damage += damage_reward
+
+
+        if num_turns_battle == 0:
+            self.prev_damage_dealt = 0
+
+        # #if opponent_level > your_level:
+        # print(f"opponent level {opponent_level > your_level}")
+        # if enemy_hp > damaged_hp:
+        #     if damage > 30:
+        #         damage_reward = 1
+        #     if damage < 30:
+        #         damage_reward = 1
+        #         self.damage= self.damage + damage_reward 
+
+        # print(f"Damage Reward: {damage_reward}")
+        return self.damage
 
     def read_hp_fraction(self):
         hp_sum = sum([self.read_hp(add) for add in [0xD16C, 0xD198, 0xD1C4, 0xD1F0, 0xD21C, 0xD248]])
